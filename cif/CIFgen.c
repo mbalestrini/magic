@@ -114,6 +114,155 @@ cifPaintFunc(tile, table)
 
 /*
  * ----------------------------------------------------------------------------
+ * SetBoxGrid ---
+ *
+ *	Adjust the given area by expanding each side individually to
+ *	ensure that it falls on the CIF minimum grid.
+ *
+ *  Returns:  Nothing
+ *
+ *  Side Effects:  Point to Rect "area" may be modified.
+ *
+ * ----------------------------------------------------------------------------
+ */
+
+void
+SetBoxGrid(area)
+    Rect *area;
+{
+    int limit;
+    int delta;
+
+    limit = CIFCurStyle->cs_gridLimit;
+
+    if (CIFCurStyle && (limit > 1))
+    {
+	delta = abs(area->r_xbot) % limit;
+	if (delta > 0)
+	{
+	    if (area->r_xbot < 0)
+	    {
+		area->r_xbot += delta;
+		area->r_xbot -= limit;
+	    }
+	    else
+		area->r_xbot -= delta;
+	}
+
+	delta = abs(area->r_xtop) % limit;
+	if (delta > 0)
+	{
+	    if (area->r_xtop < 0)
+		area->r_xtop += delta;
+	    else
+	    {
+		area->r_xtop -= delta;
+		area->r_xtop += limit;
+	    }
+	}
+
+	delta = abs(area->r_ybot) % limit;
+	if (delta > 0)
+	{
+	    if (area->r_ybot < 0)
+	    {
+		area->r_ybot += delta;
+		area->r_ybot -= limit;
+	    }
+	    else
+		area->r_ybot -= delta;
+	}
+
+	delta = abs(area->r_ytop) % limit;
+	if (delta > 0)
+	{
+	    if (area->r_ytop < 0)
+		area->r_ytop += delta;
+	    else
+	    {
+		area->r_ytop -= delta;
+		area->r_ytop += limit;
+	    }
+	}
+    }
+}
+
+/*
+ * ----------------------------------------------------------------------------
+ * SetValueGrid ---
+ *
+ *	Adjust the given distance to the nearest CIF minimum grid.
+ *
+ *  Returns:  The adjusted value.
+ *
+ *  Side Effects:  None.
+ *
+ *  Notes:  Value is assumed to be a distance, therefore always positive.
+ *
+ * ----------------------------------------------------------------------------
+ */
+
+int
+SetValueGrid(value)
+    int value;
+{
+    int limit;
+    int delta;
+
+    limit = CIFCurStyle->cs_gridLimit;
+
+    if (CIFCurStyle && (limit > 1))
+    {
+	delta = value % limit;
+	if (delta > 0)
+	    value += limit - delta;
+    }
+    return value;
+}
+
+/*
+ * ----------------------------------------------------------------------------
+ * SetMinBoxGrid ---
+ *
+ *	Adjust the given area by expanding evenly on both sides so that it
+ *	has a width and heigth no less than the given width.  Then further
+ *	expand the box to ensure that it falls on the CIF minimum grid.
+ *
+ *  Returns:  Nothing
+ *
+ *  Side Effects:  Point to Rect "area" may be modified.
+ *
+ * ----------------------------------------------------------------------------
+ */
+
+void
+SetMinBoxGrid(area, width)
+    Rect *area;
+    int width;
+{
+    int wtest;
+    int wtot;
+
+    wtest = (area->r_xtop - area->r_xbot);
+    wtot = area->r_xtop + area->r_xbot;
+    if (wtest < width)
+    {
+	area->r_xbot = (wtot - width) / 2;
+	area->r_xtop = (wtot + width) / 2;
+    }
+    wtest = (area->r_ytop - area->r_ybot);
+    wtot = area->r_ytop + area->r_ybot;
+    if (wtest < width)
+    {
+	area->r_ybot = (wtot - width) / 2;
+	area->r_ytop = (wtot + width) / 2;
+    }
+
+    SetBoxGrid(area);
+}
+
+/*
+ * ----------------------------------------------------------------------------
  *
  * cifGrowMinFunc --
  *
@@ -435,6 +584,7 @@ cifGrowEuclideanFunc(tile, table)
 	int growDistanceX, growDistanceY;
 	int height, width;
 	double hyp;
+	int limit;
 
 	if (oldType & TT_SIDE)
 	    growDirs &= ~GROW_WEST;
@@ -447,22 +597,26 @@ cifGrowEuclideanFunc(tile, table)
 	    growDirs &= ~GROW_NORTH;
 
 	/* Grow non-Manhattan edges to (the closest integer value	*/
-	/* to) growDistance along the normal to the edge.  This	*/
-	/* will overestimate the distance only to the minimum 	*/
+	/* to) growDistance along the normal to the edge.  This		*/
+	/* will overestimate the distance only to the minimum		*/
 	/* amount necessary to ensure on-grid endpoints.		*/
 
 	width = area.r_xtop - area.r_xbot;
 	height = area.r_ytop - area.r_ybot;
 	hyp = sqrt((double)(width * width + height * height));
-	growDistanceY = ceil((growDistance * (hyp - height)) / width);
-	growDistanceX = ceil((growDistance * (hyp - width)) / height);
+	growDistanceY = ceil((double)(growDistance * width) / hyp);
+	growDistanceX = ceil((double)(growDistance * height) / hyp);
+
+	/* Adjust for grid limit */
+	growDistanceX = SetValueGrid(growDistanceX);
+	growDistanceY = SetValueGrid(growDistanceY);
 
 	/* Draw vertical tile to distance X */
 
 	rtmp = area;
 	if (!(growDirs & GROW_EAST))  rtmp.r_xtop = rtmp.r_xbot + growDistanceX;
 	if (!(growDirs & GROW_WEST))  rtmp.r_xbot = rtmp.r_xtop - growDistanceX;
-	if (!(growDirs & GROW_SOUTH)) rtmp.r_ybot -=growDistance;
+	if (!(growDirs & GROW_SOUTH)) rtmp.r_ybot -= growDistance;
 	if (!(growDirs & GROW_NORTH)) rtmp.r_ytop += growDistance;
 	DBPaintPlane(cifPlane, &rtmp, table, (PaintUndoInfo *) NULL);
 
@@ -475,7 +629,7 @@ cifGrowEuclideanFunc(tile, table)
 	if (!(growDirs & GROW_NORTH)) rtmp.r_ytop = rtmp.r_ybot + growDistanceY;
 	DBPaintPlane(cifPlane, &rtmp, table, (PaintUndoInfo *) NULL);
 
-	/* Finally:  translate, resize, and paint the diagonal tile */
+	/* Finally, translate, resize, and paint the diagonal tile */
 
 	rtmp = area;
 
@@ -497,6 +651,7 @@ cifGrowEuclideanFunc(tile, table)
 	    rtmp.r_xbot += growDistanceX;
 
 	DBNMPaintPlane(cifPlane, oldType, &rtmp, table, (PaintUndoInfo *) NULL);
+
 	oldType = (growDirs & GROW_EAST) ? TiGetRightType(tile) : TiGetLeftType(tile);
     }
     else
@@ -1321,8 +1476,7 @@ GetEuclideanWidthGrid(width)
     int delta;
     int limit;
 
-    limit = CIFCurStyle->cs_gridLimit * CIFCurStyle->cs_expander;
-    limit /= (CIFCurStyle->cs_flags & CWF_ANGSTROMS) ? 100 : 10;
+    limit = CIFCurStyle->cs_gridLimit;
 
     weuclid = (int)(ceil((double)width * 0.70711));
     if (CIFCurStyle && (limit > 1))
@@ -1443,8 +1597,7 @@ GetExpandedAreaGrid(wrule, space, area)
     r.r_ybot -= dy;
     r.r_ytop += dy;
 
-    limit = CIFCurStyle->cs_gridLimit * CIFCurStyle->cs_expander;
-    limit /= (CIFCurStyle->cs_flags & CWF_ANGSTROMS) ? 100 : 10;
+    limit = CIFCurStyle->cs_gridLimit;
 
     if (CIFCurStyle && (limit > 1))
     {
@@ -1596,101 +1749,6 @@ cifBridgeFunc1(tile, brs)
 	}
     }
     return 0;
-}
-
-/*
- * ----------------------------------------------------------------------------
- * SetMinBoxGrid ---
- *
- *	Adjust the given area by expanding evenly on both sides so that it
- *	has a width and heigth no less than the given width.  Then further
- *	expand the box to ensure that it falls on the CIF minimum grid.
- *
- *  Returns:  Nothing
- *
- *  Side Effects:  Point to Rect "area" may be modified.
- *
- * ----------------------------------------------------------------------------
- */
-
-void
-SetMinBoxGrid(area, width)
-    Rect *area;
-    int width;
-{
-    int wtest;
-    int wtot;
-    int delta;
-    int limit;
-
-    wtest = (area->r_xtop - area->r_xbot);
-    wtot = area->r_xtop + area->r_xbot;
-    if (wtest < width)
-    {
-	area->r_xbot = (wtot - width) / 2;
-	area->r_xtop = (wtot + width) / 2;
-    }
-    wtest = (area->r_ytop - area->r_ybot);
-    wtot = area->r_ytop + area->r_ybot;
-    if (wtest < width)
-    {
-	area->r_ybot = (wtot - width) / 2;
-	area->r_ytop = (wtot + width) / 2;
-    }
-
-    limit = CIFCurStyle->cs_gridLimit * CIFCurStyle->cs_expander;
-    limit /= (CIFCurStyle->cs_flags & CWF_ANGSTROMS) ? 100 : 10;
-
-    if (CIFCurStyle && (limit > 1))
-    {
-	delta = abs(area->r_xbot) % limit;
-	if (delta > 0)
-	{
-	    if (area->r_xbot < 0)
-	    {
-		area->r_xbot += delta;
-		area->r_xbot -= limit;
-	    }
-	    else
-		area->r_xbot -= delta;
-	}
-
-	delta = abs(area->r_xtop) % limit;
-	if (delta > 0)
-	{
-	    if (area->r_xtop < 0)
-		area->r_xtop += delta;
-	    else
-	    {
-		area->r_xtop -= delta;
-		area->r_xtop += limit;
-	    }
-	}
-
-	delta = abs(area->r_ybot) % limit;
-	if (delta > 0)
-	{
-	    if (area->r_ybot < 0)
-	    {
-		area->r_ybot += delta;
-		area->r_ybot -= limit;
-	    }
-	    else
-		area->r_ybot -= delta;
-	}
-
-	delta = abs(area->r_ytop) % limit;
-	if (delta > 0)
-	{
-	    if (area->r_ytop < 0)
-		area->r_ytop += delta;
-	    else
-	    {
-		area->r_ytop -= delta;
-		area->r_ytop += limit;
-	    }
-	}
-    }
 }
 
 /*
@@ -3452,8 +3510,7 @@ calcX:
 
     /* Check that we are not violating any gridlimit */
 
-    limit = CIFCurStyle->cs_gridLimit * CIFCurStyle->cs_expander;
-    limit /= (CIFCurStyle->cs_flags & CWF_ANGSTROMS) ? 100 : 10;
+    limit = CIFCurStyle->cs_gridLimit;
 
     if (CIFCurStyle && (limit > 1))
     {
@@ -3542,8 +3599,7 @@ cifSquareFunc(area, op, rows, columns, cut)
     bool glimit;
     SquaresData *squares = (SquaresData *)op->co_client;
 
-    limit = CIFCurStyle->cs_gridLimit * CIFCurStyle->cs_expander;
-    limit /= (CIFCurStyle->cs_flags & CWF_ANGSTROMS) ? 100 : 10;
+    limit = CIFCurStyle->cs_gridLimit;
 
     glimit = (CIFCurStyle && (limit > 1)) ? TRUE : FALSE;
     pitch = squares->sq_size + squares->sq_sep;
